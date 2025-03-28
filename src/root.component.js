@@ -1,4 +1,4 @@
-import { Layout, Model } from "flexlayout-react";
+import { Actions, DockLocation, Layout, Model } from "flexlayout-react";
 import "flexlayout-react/style/dark.css"; // 或者使用 light.css
 import React, { useEffect, useRef, useState } from "react";
 import { BrowserRouter, Link } from "react-router-dom";
@@ -16,11 +16,12 @@ export default function Root(props) {
 
   // 初始化布局模型
   useEffect(() => {
-    // 定义初始布局配置
+    // 定义初始布局配置，只有一个欢迎标签页
     const json = {
       global: {
         splitterSize: 5,
         tabEnableFloat: false,
+        tabEnableClose: true,
       },
       borders: [],
       layout: {
@@ -29,27 +30,14 @@ export default function Root(props) {
         children: [
           {
             type: "tabset",
-            weight: 50,
-            id: "left-container",
+            weight: 100,
+            id: "main-tabset",
             children: [
               {
                 type: "tab",
-                name: "People",
-                id: "people-tab",
-                component: "people-component",
-              },
-            ],
-          },
-          {
-            type: "tabset",
-            weight: 50,
-            id: "right-container",
-            children: [
-              {
-                type: "tab",
-                name: "Planets",
-                id: "planets-tab",
-                component: "planets-component",
+                name: "欢迎",
+                id: "welcome-tab",
+                component: "welcome-component",
               },
             ],
           },
@@ -66,7 +54,14 @@ export default function Root(props) {
   const factory = (node) => {
     const component = node.getComponent();
 
-    if (component === "people-component") {
+    if (component === "welcome-component") {
+      return (
+        <div style={{ padding: "20px", textAlign: "center" }}>
+          <h2>欢迎使用微前端应用</h2>
+          <p>请点击顶部导航按钮加载应用</p>
+        </div>
+      );
+    } else if (component === "people-component") {
       return (
         <div style={{ width: "100%", height: "100%" }}>
           <div
@@ -89,14 +84,98 @@ export default function Root(props) {
     return <div>未知组件</div>;
   };
 
+  // 转换到左右两列布局
+  const convertToSplitLayout = () => {
+    if (!layoutModel) return;
+
+    // 检查欢迎标签页是否存在
+    const welcomeTab = layoutModel.getNodeById("welcome-tab");
+    if (welcomeTab) {
+      // 先删除欢迎标签页
+      layoutModel.doAction(Actions.deleteTab("welcome-tab"));
+    }
+
+    // 检查是否已经存在分割布局
+    const leftContainer = layoutModel.getNodeById("left-container");
+    const rightContainer = layoutModel.getNodeById("right-container");
+
+    if (!leftContainer && !rightContainer) {
+      // 清空主布局
+      const rootNode = layoutModel.getRoot();
+      const mainTabset = layoutModel.getNodeById("main-tabset");
+      if (mainTabset) {
+        // 删除主标签集
+        layoutModel.doAction(Actions.deleteTabset("main-tabset"));
+      }
+
+      // 创建左右两列布局
+      const rowNode = {
+        type: "row",
+        weight: 100,
+        children: [
+          {
+            type: "tabset",
+            weight: 50,
+            id: "left-container",
+            children: [],
+          },
+          {
+            type: "tabset",
+            weight: 50,
+            id: "right-container",
+            children: [],
+          },
+        ],
+      };
+
+      // 添加到根节点
+      layoutModel.doAction(
+        Actions.addNode(
+          rowNode,
+          layoutModel.getRoot().getId(),
+          DockLocation.CENTER,
+          -1,
+          true
+        )
+      );
+    }
+  };
+
+  // 加载应用并创建标签页
   const loadApp = (appName) => {
-    // 避免重复加载
-    if (loadedApps[appName]) return;
+    if (!layoutModel) return;
+
+    // 先确保转换到左右两列布局
+    convertToSplitLayout();
 
     const appNameWithPrefix = `@react-mf/${appName}`;
+    const tabsetId =
+      appName === "people" ? "left-container" : "right-container";
+    const componentName = `${appName}-component`;
+    const tabId = `${appName}-tab`;
 
-    // 使用全局方法激活应用
-    if (window.activateApp) {
+    // 检查是否已经存在该应用的标签页
+    const existingTab = layoutModel.getNodeById(tabId);
+    if (!existingTab) {
+      // 如果不存在，创建新标签页
+      const tabJson = {
+        type: "tab",
+        name: appName.charAt(0).toUpperCase() + appName.slice(1),
+        id: tabId,
+        component: componentName,
+      };
+
+      // 添加到对应的标签集
+      layoutModel.doAction(
+        Actions.addNode(tabJson, tabsetId, DockLocation.CENTER, -1, true)
+      );
+    }
+
+    // 激活标签页
+    layoutModel.doAction(Actions.selectTab(tabId));
+
+    // 激活应用
+    if (!loadedApps[appName] && window.activateApp) {
       window.activateApp(appNameWithPrefix);
 
       // 标记应用已加载
@@ -104,8 +183,6 @@ export default function Root(props) {
         ...prev,
         [appName]: true,
       }));
-    } else {
-      console.error("activateApp 方法未定义，请确保 root-config 已正确加载");
     }
   };
 
